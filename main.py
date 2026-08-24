@@ -55,9 +55,3 @@ def delete_customer(user_id: int):
     return {
         "message": "Customer deleted"
     }
-
-
-
-
-# cd "C:\Users\Daniel\Desktop\Python\FastAPI\Project 1"
-# python -m uvicorn main:app --reload    
