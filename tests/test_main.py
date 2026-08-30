@@ -34,6 +34,7 @@ NAMES_WITH_WHITESPACE = [
     ("Ben Jones ", "Ben Jones"),
     (" Ben Jones ", "Ben Jones")
      ]
+MISSING_CUSTOMER_DATA = [{"name": "Ben"}, {"customer_id": 104}, {}]
 
 # =========================
 # GET
@@ -121,6 +122,12 @@ def test_post_names_with_whitespace(client, input_name, expected_name):
 
     # Confirm the stripped name was actually stored
     assert customers[104] == expected_name
+
+@pytest.mark.parametrize("data", MISSING_CUSTOMER_DATA)
+def test_post_missing_customer_data(client, data):
+    response = client.post("/customers", json=data)
+
+    assert response.status_code == 422
 
 # =========================
 # PATCH
