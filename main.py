@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, status, Path
+from pydantic import BaseModel, Field, field_validator
+from typing import Annotated
 
 app = FastAPI()
 
@@ -12,73 +13,98 @@ customers = {
 
 # The structure of a complete customer
 class Customer(BaseModel):
-    user_id: int
-    name: str
+    customer_id: int = Field(ge=1, le=2**31-1)
+    name: str = Field(min_length=1, max_length=50)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def validate_name(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+
+        if not value:
+            raise ValueError("Name cannot be blank")
+
+        return value
+
 
 # The fields that can be udpated
 class CustomerUpdate(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=50)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def validate_name(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+
+        if not value:
+            raise ValueError("Name cannot be blank")
+
+        return value
+
+CustomerID = Annotated[int, Path(ge=1, le=2**31-1)]
 
 # Get a customer
-@app.get("/customers/{user_id}")
-def get_customer(user_id: int):
+@app.get("/customers/{customer_id}")
+def get_customer(customer_id: CustomerID):
 
-    if user_id not in customers:
+    if customer_id not in customers:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Customer not found"
         )
 
     return {
-        "user_id": user_id,
-        "name": customers[user_id]
+        "customer_id": customer_id,
+        "name": customers[customer_id]
     }
 
 # Create a new customer
 @app.post("/customers")
 def create_customer(customer: Customer):
 
-    if customer.user_id in customers:
+    if customer.customer_id in customers:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Customer ID already exists"
         )
     
-    customers[customer.user_id] = customer.name
+    customers[customer.customer_id] = customer.name
 
     return customer
 
 # Update part of a customer
-@app.patch("/customers/{user_id}")
-def update_customer(user_id: int, customer: CustomerUpdate):
+@app.patch("/customers/{customer_id}")
+def update_customer(customer_id: CustomerID, customer: CustomerUpdate):
 
-    if user_id not in customers:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Customer not found"
-        )
-
-    customers[user_id] = customer.name
-
-    return customer
-
-# @app.put("/customers/{user_id}")
-# def replace_customer(user_id: int, customer: Customer):
-#     customers[user_id] = customer.name
-
-#     return customer
-
-# Delete a customer
-@app.delete("/customers/{user_id}")
-def delete_customer(user_id: int):
-
-    if user_id not in customers:
+    if customer_id not in customers:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Customer not found"
         )
 
-    del customers[user_id]
+    customers[customer_id] = customer.name
+
+    return customer
+
+# @app.put("/customers/{customer_id}")
+# def replace_customer(customer_id: int, customer: Customer):
+#     customers[customer_id] = customer.name
+
+#     return customer
+
+# Delete a customer
+@app.delete("/customers/{customer_id}")
+def delete_customer(customer_id: CustomerID):
+
+    if customer_id not in customers:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found"
+        )
+
+    del customers[customer_id]
 
     return {
         "message": "Customer deleted"
