@@ -1,3 +1,6 @@
 .venv/
 __pycache__/
-main2.py
+.env
+env.py
+.pytest_cache/
+.env.test
