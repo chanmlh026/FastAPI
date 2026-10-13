@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BeforeValidator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -10,6 +10,7 @@ from app.customers.models import CustomerModel
 from app.customers.pagination import decode_cursor, encode_cursor, token_cipher
 from app.customers.schemas import (
     CustomerCreate,
+    CustomerID,
     CustomerNameField,
     CustomerResponse,
     ListCustomersResponse,
@@ -21,8 +22,6 @@ router = APIRouter(
     tags=["customers"],
 )
 
-CustomerID = Annotated[int, Path(ge=1, le=2**31 - 1)]
-
 DatabaseSession = Annotated[Session, Depends(get_db)]
 
 
@@ -30,9 +29,13 @@ def validate_page_size(value: str | int) -> int:
     try:
         size = int(value)
     except ValueError:
-        raise HTTPException(400, "page_size must be a nonnegative integer") from None
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "page_size must be a nonnegative integer"
+        ) from None
     if size < 0:
-        raise HTTPException(400, "page_size must be a nonnegative integer")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "page_size must be a nonnegative integer"
+        )
     return min(size or 50, 1000)
 
 
@@ -40,9 +43,7 @@ def get_customer_or_404(customer_id: int, db: Session) -> CustomerModel:
     customer = db.get(CustomerModel, customer_id)
 
     if customer is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found"
-        )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer not found")
 
     return customer
 
@@ -65,21 +66,19 @@ def list_customers(
     """List customers by ascending ID. Invalid pagination arguments return 400."""
     size = page_size
     query = q.strip()
-    cipher = token_cipher()
+    token_cipher()
     statement = select(CustomerModel).order_by(CustomerModel.customer_id)
     if query:
         statement = statement.where(
             CustomerModel.name.icontains(query, autoescape=True)
         )
     if page_token:
-        last_id = decode_cursor(cipher, page_token, query)
+        last_id = decode_cursor(page_token, query)
         statement = statement.where(CustomerModel.customer_id > last_id)
     rows = list(db.scalars(statement.limit(size + 1)))
     customers = rows[:size]
     next_token = (
-        encode_cursor(cipher, customers[-1].customer_id, query)
-        if len(rows) > size
-        else ""
+        encode_cursor(customers[-1].customer_id, query) if len(rows) > size else ""
     )
     return {"customers": customers, "next_page_token": next_token}
 
@@ -108,9 +107,7 @@ def create_customer(customer: CustomerCreate, db: DatabaseSession):
     except IntegrityError:
         db.rollback()
 
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Customer ID already exists"
-        )
+        raise HTTPException(status.HTTP_409_CONFLICT, "Customer ID already exists")
 
     db.refresh(database_customer)
 

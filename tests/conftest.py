@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db.database import get_db
 from app.main import app
 from app.core.config import get_environment
+from app.customers import pagination
 
 load_dotenv(".env.test")
 
@@ -20,6 +21,7 @@ TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_eng
 
 @pytest.fixture(autouse=True)
 def pagination_key(monkeypatch):
+    monkeypatch.setattr(pagination, "saved_token_cipher", None)
     monkeypatch.setattr(
         get_environment(), "pagination_token_key", Fernet.generate_key().decode()
     )

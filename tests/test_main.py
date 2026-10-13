@@ -3,6 +3,7 @@ import json
 import pytest
 from app.customers.pagination import token_cipher
 from app.core.config import get_environment
+from fastapi import status
 from fastapi.testclient import TestClient
 
 from app.customers.models import CustomerModel
@@ -50,7 +51,7 @@ def test_get_existing_customer(client):
     customer_id, expected_name = EXISTING_CUSTOMERS[0]
     response = client.get(f"/customers/{customer_id}")
 
-    assert response.status_code == 200
+    assert response.status_code == status.HTTP_200_OK
 
     assert response.json() == {"customer_id": customer_id, "name": expected_name}
 
@@ -58,7 +59,7 @@ def test_get_existing_customer(client):
 def test_get_non_existing_customer(client):
     response = client.get(f"/customers/{NON_EXISTING_CUSTOMER_ID}")
 
-    assert response.status_code == 404
+    assert response.status_code == status.HTTP_404_NOT_FOUND
 
     assert response.json() == {"detail": "Customer not found"}
 
@@ -67,12 +68,12 @@ def test_get_non_existing_customer(client):
 def test_get_invalid_customer_id(client, customer_id):
     response = client.get(f"/customers/{customer_id}")
 
-    assert response.status_code == 422
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_list_customers(client):
     response = client.get("/customers")
-    assert response.status_code == 200
+    assert response.status_code == status.HTTP_200_OK
     assert response.json() == {
         "customers": [
             {"customer_id": cid, "name": name} for cid, name in EXISTING_CUSTOMERS
@@ -98,7 +99,7 @@ def test_list_customers(client):
 )
 def test_list_search(client, query, ids):
     response = client.get("/customers", params={"q": query})
-    assert response.status_code == 200
+    assert response.status_code == status.HTTP_200_OK
     assert [row["customer_id"] for row in response.json()["customers"]] == ids
     assert response.json()["next_page_token"] == ""
 
@@ -125,7 +126,7 @@ def test_list_walk_pages(client, size):
         response = client.get(
             "/customers", params={"page_size": size, "page_token": token}
         )
-        assert response.status_code == 200
+        assert response.status_code == status.HTTP_200_OK
         result = response.json()
         assert len(result["customers"]) <= size
         ids.extend(row["customer_id"] for row in result["customers"])
@@ -154,7 +155,7 @@ def test_list_filtered_pages_and_changed_size(client, db_session):
             "page_token": first["next_page_token"],
         },
     )
-    assert second.status_code == 200
+    assert second.status_code == status.HTTP_200_OK
     assert [row["customer_id"] for row in second.json()["customers"]] == [102, 104]
     assert second.json()["next_page_token"] == ""
     assert (
@@ -165,7 +166,7 @@ def test_list_filtered_pages_and_changed_size(client, db_session):
                 "page_token": first["next_page_token"],
             },
         ).status_code
-        == 400
+        == status.HTTP_400_BAD_REQUEST
     )
 
 
@@ -181,32 +182,45 @@ def test_list_page_size_limits(client, db_session):
         ({"page_size": 1001}, 1000),
     ]:
         response = client.get("/customers", params=params)
-        assert response.status_code == 200
+        assert response.status_code == status.HTTP_200_OK
         assert len(response.json()["customers"]) == expected
         assert response.json()["next_page_token"]
 
 
 @pytest.mark.parametrize("size", [-1, "abc", "1.5", ""])
 def test_list_invalid_page_size(client, size):
-    assert client.get("/customers", params={"page_size": size}).status_code == 400
+    assert (
+        client.get("/customers", params={"page_size": size}).status_code
+        == status.HTTP_400_BAD_REQUEST
+    )
 
 
 @pytest.mark.parametrize("token", ["invalid", "☃"])
 def test_list_invalid_token(client, token):
-    assert client.get("/customers", params={"page_token": token}).status_code == 400
+    assert (
+        client.get("/customers", params={"page_token": token}).status_code
+        == status.HTTP_400_BAD_REQUEST
+    )
 
 
 def test_list_tampered_token(client):
     token = client.get("/customers", params={"page_size": 1}).json()["next_page_token"]
     pos = len(token) // 2
     token = token[:pos] + ("A" if token[pos] != "A" else "B") + token[pos + 1 :]
-    assert client.get("/customers", params={"page_token": token}).status_code == 400
+    assert (
+        client.get("/customers", params={"page_token": token}).status_code
+        == status.HTTP_400_BAD_REQUEST
+    )
 
 
 @pytest.mark.parametrize(
     "payload",
     [
         {"version": 2, "last_id": 101, "q": ""},
+        {"version": True, "last_id": 101, "q": ""},
+        {"version": 1, "last_id": "101", "q": ""},
+        {"version": 1, "last_id": 2**31, "q": ""},
+        {"version": 1, "last_id": 101, "q": None},
         {"version": 1, "last_id": True, "q": ""},
         {"version": 1, "last_id": 0, "q": ""},
         {},
@@ -215,13 +229,16 @@ def test_list_tampered_token(client):
 )
 def test_list_invalid_cursor_payload(client, payload):
     token = token_cipher().encrypt(json.dumps(payload).encode()).decode()
-    assert client.get("/customers", params={"page_token": token}).status_code == 400
+    assert (
+        client.get("/customers", params={"page_token": token}).status_code
+        == status.HTTP_400_BAD_REQUEST
+    )
 
 
 @pytest.mark.parametrize("key", [None, "invalid", "☃"])
 def test_list_invalid_key_configuration(client, monkeypatch, key):
     monkeypatch.setattr(get_environment(), "pagination_token_key", key)
-    assert client.get("/customers").status_code == 503
+    assert client.get("/customers").status_code == status.HTTP_503_SERVICE_UNAVAILABLE
 
 
 def test_list_openapi_page_size(client):
@@ -256,7 +273,7 @@ def test_post_customer(client, db_session):
         json={"customer_id": NON_EXISTING_CUSTOMER_ID, "name": expected_name},
     )
 
-    assert response.status_code == 201
+    assert response.status_code == status.HTTP_201_CREATED
 
     assert response.json() == {
         "customer_id": NON_EXISTING_CUSTOMER_ID,
@@ -277,7 +294,7 @@ def test_post_existing_customer(client):
         "/customers", json={"customer_id": customer_id, "name": "RANDOM"}
     )
 
-    assert response.status_code == 409
+    assert response.status_code == status.HTTP_409_CONFLICT
 
     assert response.json() == {"detail": "Customer ID already exists"}
 
@@ -288,7 +305,7 @@ def test_post_invalid_customer_id(client, customer_id):
         "/customers", json={"customer_id": customer_id, "name": "Ben"}
     )
 
-    assert response.status_code == 422
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 @pytest.mark.parametrize("name", INVALID_NAMES)
@@ -297,7 +314,7 @@ def test_post_invalid_name(client, name):
         "/customers", json={"customer_id": NON_EXISTING_CUSTOMER_ID, "name": name}
     )
 
-    assert response.status_code == 422
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_post_too_long_name(client):
@@ -305,7 +322,7 @@ def test_post_too_long_name(client):
         "/customers", json={"customer_id": NON_EXISTING_CUSTOMER_ID, "name": "B" * 1000}
     )
 
-    assert response.status_code == 422
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_post_names_with_whitespace(client, db_session):
@@ -314,7 +331,7 @@ def test_post_names_with_whitespace(client, db_session):
         "/customers", json={"customer_id": NON_EXISTING_CUSTOMER_ID, "name": input_name}
     )
 
-    assert response.status_code == 201
+    assert response.status_code == status.HTTP_201_CREATED
 
     assert response.json() == {
         "customer_id": NON_EXISTING_CUSTOMER_ID,
@@ -333,7 +350,7 @@ def test_post_names_with_whitespace(client, db_session):
 def test_post_missing_customer_data(client, data):
     response = client.post("/customers", json=data)
 
-    assert response.status_code == 422
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 # =========================
@@ -345,7 +362,7 @@ def test_patch_existing_customer(client, db_session):
     customer_id = EXISTING_CUSTOMER_IDS[0]
     response = client.patch(f"/customers/{customer_id}", json={"name": "Ben"})
 
-    assert response.status_code == 200
+    assert response.status_code == status.HTTP_200_OK
 
     assert response.json() == {"customer_id": customer_id, "name": "Ben"}
 
@@ -362,7 +379,7 @@ def test_patch_non_existing_customer(client):
         f"/customers/{NON_EXISTING_CUSTOMER_ID}", json={"name": "Ben"}
     )
 
-    assert response.status_code == 404
+    assert response.status_code == status.HTTP_404_NOT_FOUND
 
     assert response.json() == {"detail": "Customer not found"}
 
@@ -371,20 +388,20 @@ def test_patch_non_existing_customer(client):
 def test_patch_invalid_customer_id(client, customer_id):
     response = client.patch(f"/customers/{customer_id}", json={"name": "Ben"})
 
-    assert response.status_code == 422
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 @pytest.mark.parametrize("name", INVALID_NAMES)
 def test_patch_invalid_name(client, name):
     response = client.patch("/customers/101", json={"name": name})
 
-    assert response.status_code == 422
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_patch_too_long_name(client):
     response = client.patch("/customers/101", json={"name": "BA" * 1000})
 
-    assert response.status_code == 422
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_patch_names_with_whitespace(client, db_session):
@@ -392,7 +409,7 @@ def test_patch_names_with_whitespace(client, db_session):
 
     response = client.patch("/customers/101", json={"name": input_name})
 
-    assert response.status_code == 200
+    assert response.status_code == status.HTTP_200_OK
 
     assert response.json() == {"customer_id": 101, "name": expected_name}
 
@@ -407,7 +424,7 @@ def test_patch_names_with_whitespace(client, db_session):
 def test_patch_missing_customer_id(client):
     response = client.patch("/customers/", json={"name": "Ben"})
 
-    assert response.status_code == 405
+    assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
 
 # =========================
@@ -419,7 +436,7 @@ def test_delete_existing_customer(client, db_session):
     customer_id = EXISTING_CUSTOMER_IDS[0]
     response = client.delete(f"/customers/{customer_id}")
 
-    assert response.status_code == 200
+    assert response.status_code == status.HTTP_200_OK
 
     assert response.json() == {"message": "Customer deleted"}
 
@@ -433,7 +450,7 @@ def test_delete_existing_customer(client, db_session):
 def test_delete_non_existing_customer(client):
     response = client.delete(f"/customers/{NON_EXISTING_CUSTOMER_ID}")
 
-    assert response.status_code == 404
+    assert response.status_code == status.HTTP_404_NOT_FOUND
 
     assert response.json() == {"detail": "Customer not found"}
 
@@ -442,4 +459,8 @@ def test_delete_non_existing_customer(client):
 def test_delete_invalid_customer_id(client, customer_id):
     response = client.delete(f"/customers/{customer_id}")
 
-    assert response.status_code == 422
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+def test_token_cipher_is_reused():
+    assert token_cipher() is token_cipher()

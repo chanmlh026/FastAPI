@@ -1,42 +1,64 @@
 """Opaque, authenticated cursors for the customers collection."""
 
-import json
-
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import HTTPException
+from fastapi import HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import get_environment
+from app.customers.schemas import CustomerIDValue
+
+
+class CursorPayload(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    version: int = Field(ge=1, le=1)
+    last_id: CustomerIDValue
+    q: str
+
+
+saved_token_cipher: Fernet | None = None
 
 
 def token_cipher() -> Fernet:
+    global saved_token_cipher
+
+    if saved_token_cipher is not None:
+        return saved_token_cipher
+
     key = get_environment().pagination_token_key
     if not key:
-        raise HTTPException(503, "Pagination token key is not configured")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Pagination token key is not configured",
+        )
     try:
-        return Fernet(key.encode("ascii"))
+        saved_token_cipher = Fernet(key.encode("ascii"))
     except ValueError, UnicodeError:
-        raise HTTPException(503, "Pagination token key is invalid") from None
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Pagination token key is invalid"
+        ) from None
+
+    return saved_token_cipher
 
 
-def encode_cursor(cipher: Fernet, customer_id: int, query: str) -> str:
-    payload = {"version": 1, "last_id": customer_id, "q": query}
-    return cipher.encrypt(json.dumps(payload).encode("utf-8")).decode("ascii")
+def encode_cursor(customer_id: int, query: str) -> str:
+    payload = CursorPayload(version=1, last_id=customer_id, q=query)
+    return (
+        token_cipher()
+        .encrypt(payload.model_dump_json().encode("utf-8"))
+        .decode("ascii")
+    )
 
 
-def decode_cursor(cipher: Fernet, token: str, query: str) -> int:
+def decode_cursor(token: str, query: str) -> int:
     try:
-        payload = json.loads(cipher.decrypt(token.encode("ascii")))
-        if (
-            not isinstance(payload, dict)
-            or type(payload.get("version")) is not int
-            or payload["version"] != 1
-            or type(payload.get("last_id")) is not int
-            or not 1 <= payload["last_id"] <= 2**31 - 1
-            or payload.get("q") != query
-        ):
+        payload = CursorPayload.model_validate_json(
+            token_cipher().decrypt(token.encode("ascii"))
+        )
+        if payload.q != query:
             raise ValueError
-        return payload["last_id"]
+        return payload.last_id
     except InvalidToken, ValueError, UnicodeError, TypeError:
         raise HTTPException(
-            400, "Invalid page_token or search does not match"
+            status.HTTP_400_BAD_REQUEST, "Invalid page_token or search does not match"
         ) from None

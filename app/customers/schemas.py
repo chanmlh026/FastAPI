@@ -1,9 +1,12 @@
 from typing import Annotated
+from fastapi import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.customers.constants import MAX_NAME_LENGTH
 
 
 class CustomerNameField(BaseModel):
-    name: str = Field(min_length=1, max_length=50)
+    name: str = Field(min_length=1, max_length=MAX_NAME_LENGTH)
 
     @field_validator("name", mode="before")
     @classmethod
@@ -18,6 +21,7 @@ class CustomerNameField(BaseModel):
 
 
 CustomerIDValue = Annotated[int, Field(ge=1, le=2**31 - 1)]
+CustomerID = Annotated[int, Path(ge=1, le=2**31 - 1)]
 
 
 class CustomerCreate(CustomerNameField):

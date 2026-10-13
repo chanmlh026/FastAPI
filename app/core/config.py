@@ -20,7 +20,7 @@ def get_environment() -> Environment:
     if saved_environment is None:
         load_dotenv()
         saved_environment = Environment(
-            database_url=os.environ["DATABASE_URL"],
+            database_url=os.environ.get("DATABASE_URL"),
             pagination_token_key=os.environ.get("PAGINATION_TOKEN_KEY"),
         )
 
