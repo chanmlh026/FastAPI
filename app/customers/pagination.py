@@ -5,13 +5,14 @@ from fastapi import HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import get_environment
+from app.customers.constants import CURSOR_VERSION
 from app.customers.schemas import CustomerIDValue
 
 
 class CursorPayload(BaseModel):
     model_config = ConfigDict(strict=True)
 
-    version: int = Field(ge=1, le=1)
+    version: int = Field(ge=CURSOR_VERSION, le=CURSOR_VERSION)
     last_id: CustomerIDValue
     q: str
 
@@ -42,7 +43,7 @@ def token_cipher() -> Fernet:
 
 
 def encode_cursor(customer_id: int, query: str) -> str:
-    payload = CursorPayload(version=1, last_id=customer_id, q=query)
+    payload = CursorPayload(version=CURSOR_VERSION, last_id=customer_id, q=query)
     return (
         token_cipher()
         .encrypt(payload.model_dump_json().encode("utf-8"))

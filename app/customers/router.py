@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.customers.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.customers.models import CustomerModel
 from app.customers.pagination import decode_cursor, encode_cursor, token_cipher
 from app.customers.schemas import (
@@ -17,10 +18,7 @@ from app.customers.schemas import (
 )
 from app.db.database import get_db
 
-router = APIRouter(
-    prefix="/customers",
-    tags=["customers"],
-)
+router = APIRouter(prefix="/customers", tags=["customers"],)
 
 DatabaseSession = Annotated[Session, Depends(get_db)]
 
@@ -36,7 +34,7 @@ def validate_page_size(value: str | int) -> int:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "page_size must be a nonnegative integer"
         )
-    return min(size or 50, 1000)
+    return min(size or DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
 
 
 def get_customer_or_404(customer_id: int, db: Session) -> CustomerModel:
@@ -57,8 +55,13 @@ def list_customers(
     page_size: Annotated[
         int,
         BeforeValidator(validate_page_size),
-        Query(description="Maximum results: default 50 (also for 0), capped at 1000."),
-    ] = 50,
+        Query(
+            description=(
+                f"Maximum results: default {DEFAULT_PAGE_SIZE} (also for 0), "
+                f"capped at {MAX_PAGE_SIZE}."
+            )
+        ),
+    ] = DEFAULT_PAGE_SIZE,
     page_token: Annotated[
         str, Query(description="Opaque continuation token; keep q unchanged.")
     ] = "",

@@ -2,7 +2,7 @@ from typing import Annotated
 from fastapi import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.customers.constants import MAX_NAME_LENGTH
+from app.customers.constants import MAX_CUSTOMER_ID, MAX_NAME_LENGTH
 
 
 class CustomerNameField(BaseModel):
@@ -20,8 +20,8 @@ class CustomerNameField(BaseModel):
         return value
 
 
-CustomerIDValue = Annotated[int, Field(ge=1, le=2**31 - 1)]
-CustomerID = Annotated[int, Path(ge=1, le=2**31 - 1)]
+CustomerIDValue = Annotated[int, Field(ge=1, le=MAX_CUSTOMER_ID)]
+CustomerID = Annotated[int, Path(ge=1, le=MAX_CUSTOMER_ID)]
 
 
 class CustomerCreate(CustomerNameField):

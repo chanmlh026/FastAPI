@@ -6,6 +6,13 @@ from app.core.config import get_environment
 from fastapi import status
 from fastapi.testclient import TestClient
 
+from app.customers.constants import (
+    CURSOR_VERSION,
+    DEFAULT_PAGE_SIZE,
+    MAX_CUSTOMER_ID,
+    MAX_NAME_LENGTH,
+    MAX_PAGE_SIZE,
+)
 from app.customers.models import CustomerModel
 from app.main import app
 
@@ -16,7 +23,7 @@ from app.main import app
 EXISTING_CUSTOMERS = [(101, "John"), (102, "Mary"), (103, "David")]
 EXISTING_CUSTOMER_IDS = [customer_id for customer_id, _ in EXISTING_CUSTOMERS]
 NON_EXISTING_CUSTOMER_ID = 3
-INVALID_CUSTOMER_IDS = [-1, 0, 2**31, "abc"]
+INVALID_CUSTOMER_IDS = [-1, 0, MAX_CUSTOMER_ID + 1, "abc"]
 INVALID_NAMES = ["", " ", 123]
 NAME_WITH_WHITESPACE = "  John Doe  ", "John Doe"
 MISSING_CUSTOMER_DATA = [{"name": "Ben"}, {"customer_id": 104}, {}]
@@ -122,7 +129,7 @@ def test_list_empty(client, db_session):
 def test_list_walk_pages(client, size):
     ids = []
     token = ""
-    for _ in range(4):
+    for _ in range(len(EXISTING_CUSTOMERS) + 1):
         response = client.get(
             "/customers", params={"page_size": size, "page_token": token}
         )
@@ -172,14 +179,15 @@ def test_list_filtered_pages_and_changed_size(client, db_session):
 
 def test_list_page_size_limits(client, db_session):
     db_session.add_all(
-        CustomerModel(customer_id=i, name="Extra") for i in range(1000, 2001)
+        CustomerModel(customer_id=i, name="Extra")
+        for i in range(MAX_PAGE_SIZE, 2 * MAX_PAGE_SIZE + 1)
     )
     db_session.commit()
     for params, expected in [
-        ({}, 50),
-        ({"page_size": 0}, 50),
-        ({"page_size": 1000}, 1000),
-        ({"page_size": 1001}, 1000),
+        ({}, DEFAULT_PAGE_SIZE),
+        ({"page_size": 0}, DEFAULT_PAGE_SIZE),
+        ({"page_size": MAX_PAGE_SIZE}, MAX_PAGE_SIZE),
+        ({"page_size": MAX_PAGE_SIZE + 1}, MAX_PAGE_SIZE),
     ]:
         response = client.get("/customers", params=params)
         assert response.status_code == status.HTTP_200_OK
@@ -216,13 +224,13 @@ def test_list_tampered_token(client):
 @pytest.mark.parametrize(
     "payload",
     [
-        {"version": 2, "last_id": 101, "q": ""},
+        {"version": CURSOR_VERSION + 1, "last_id": 101, "q": ""},
         {"version": True, "last_id": 101, "q": ""},
-        {"version": 1, "last_id": "101", "q": ""},
-        {"version": 1, "last_id": 2**31, "q": ""},
-        {"version": 1, "last_id": 101, "q": None},
-        {"version": 1, "last_id": True, "q": ""},
-        {"version": 1, "last_id": 0, "q": ""},
+        {"version": CURSOR_VERSION, "last_id": "101", "q": ""},
+        {"version": CURSOR_VERSION, "last_id": MAX_CUSTOMER_ID + 1, "q": ""},
+        {"version": CURSOR_VERSION, "last_id": 101, "q": None},
+        {"version": CURSOR_VERSION, "last_id": True, "q": ""},
+        {"version": CURSOR_VERSION, "last_id": 0, "q": ""},
         {},
         [],
     ],
@@ -249,7 +257,7 @@ def test_list_openapi_page_size(client):
         parameter for parameter in parameters if parameter["name"] == "page_size"
     )
     assert page_size["schema"]["type"] == "integer"
-    assert page_size["schema"]["default"] == 50
+    assert page_size["schema"]["default"] == DEFAULT_PAGE_SIZE
 
 
 def test_list_deleted_cursor_customer(client, db_session):
@@ -319,7 +327,11 @@ def test_post_invalid_name(client, name):
 
 def test_post_too_long_name(client):
     response = client.post(
-        "/customers", json={"customer_id": NON_EXISTING_CUSTOMER_ID, "name": "B" * 1000}
+        "/customers",
+        json={
+            "customer_id": NON_EXISTING_CUSTOMER_ID,
+            "name": "B" * (MAX_NAME_LENGTH + 1),
+        },
     )
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
@@ -399,7 +411,9 @@ def test_patch_invalid_name(client, name):
 
 
 def test_patch_too_long_name(client):
-    response = client.patch("/customers/101", json={"name": "BA" * 1000})
+    response = client.patch(
+        "/customers/101", json={"name": "BA" * (MAX_NAME_LENGTH + 1)}
+    )
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
