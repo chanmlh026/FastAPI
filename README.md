@@ -166,7 +166,7 @@ uv run pytest
 |   `-- setup.sql              # Customer table and sample data
 |-- tests/
 |   |-- conftest.py            # Test database configuration
-|   `-- test_main.py           # API tests
+|   `-- test_customers.py      # API tests
 |-- .env                       # Local application configuration
 |-- .env.test                  # Local test configuration
 |-- pyproject.toml             # Dependencies and tool configuration

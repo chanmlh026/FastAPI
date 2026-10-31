@@ -4,3 +4,4 @@ __pycache__/
 env.py
 .pytest_cache/
 .env.test
+interview_study_copy/
