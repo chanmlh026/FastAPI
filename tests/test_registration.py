@@ -1,7 +1,13 @@
+from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
+from time import monotonic
+
 import pytest
+from psycopg.errors import UniqueViolation
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from app.auth.models import UserModel
 from app.auth.passwords import hash_password, verify_password
@@ -86,6 +92,55 @@ def test_database_enforces_case_insensitive_uniqueness(db_session):
         db_session.commit()
     db_session.rollback()
     assert error.value.orig.diag.constraint_name == "uq_users_email_lower"
+
+
+def test_concurrent_email_inserts_cannot_both_commit(db_session):
+    # Use the fixture's verified test engine for every connection, including workers.
+    bind = db_session.get_bind()
+    password_hash = hash_password(PASSWORD)
+    loser_pid_queue = Queue()
+
+    def competing_insert():
+        with Session(bind) as loser:
+            # Bound database waits even if coordination or assertions fail.
+            loser.execute(text("SET LOCAL statement_timeout = '15s'"))
+            loser_pid_queue.put(loser.scalar(select(func.pg_backend_pid())))
+            loser.add(UserModel(email=EMAIL.upper(), password_hash=password_hash))
+            try:
+                loser.commit()
+            except IntegrityError:
+                loser.rollback()
+                assert loser.is_active
+                raise
+
+    with Session(bind) as winner:
+        winner.add(UserModel(email=EMAIL, password_hash=password_hash))
+        winner.flush()
+        winner_pid = winner.scalar(select(func.pg_backend_pid()))
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            attempt = executor.submit(competing_insert)
+            try:
+                loser_pid = loser_pid_queue.get(timeout=10)
+                deadline = monotonic() + 10
+                # Observe a real PostgreSQL lock dependency before releasing the winner.
+                while winner_pid not in db_session.scalar(
+                    select(func.pg_blocking_pids(loser_pid))
+                ):
+                    if attempt.done():
+                        attempt.result()  # Surface worker failures without waiting out the deadline.
+                        pytest.fail("Competing insert committed before the winner")
+                    assert monotonic() < deadline, "Competing insert never blocked"
+                winner.commit()
+                with pytest.raises(IntegrityError) as error:
+                    attempt.result(timeout=20)
+            finally:
+                # Release locks before joining the worker, including on assertion failures.
+                winner.rollback()
+
+    assert isinstance(error.value.orig, UniqueViolation)
+    assert error.value.orig.sqlstate == "23505"
+    assert error.value.orig.diag.constraint_name == "uq_users_email_lower"
+    assert db_session.scalar(select(func.count()).select_from(UserModel)) == 1
 
 
 @pytest.mark.parametrize(

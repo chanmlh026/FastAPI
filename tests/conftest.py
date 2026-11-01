@@ -11,6 +11,7 @@ from app.db.database import get_db
 from app.main import app
 from app.core.config import get_environment
 from app.customers import pagination
+from tests.database_safety import validate_database_urls
 
 load_dotenv(".env.test")
 
@@ -22,17 +23,11 @@ TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_eng
 
 @pytest.fixture(scope="session", autouse=True)
 def confirm_test_database():
+    try:
+        validate_database_urls(TEST_DATABASE_URL, get_environment().database_url)
+    except ValueError as exc:
+        pytest.exit(str(exc))
     test_url = make_url(TEST_DATABASE_URL)
-    runtime_url = make_url(get_environment().database_url)
-    if (
-        test_url.get_backend_name() != "postgresql"
-        or not test_url.database
-        or "test" not in test_url.database.lower()
-        or test_url.database == runtime_url.database
-    ):
-        pytest.exit(
-            "Refusing destructive tests: use a separate PostgreSQL test database."
-        )
     with test_engine.connect() as connection:
         if connection.scalar(text("SELECT current_database()")) != test_url.database:
             pytest.exit("Test database identity does not match configuration.")

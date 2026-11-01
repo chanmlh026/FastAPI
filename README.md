@@ -62,9 +62,13 @@ TEST_DATABASE_URL=postgresql+psycopg://postgres:password@localhost:5432/customer
 The test database must contain both `customers` and `users`. Tests delete and
 reseed customer records and delete test users, so never point
 `TEST_DATABASE_URL` at development or production data. A safety guard requires
-a PostgreSQL database name containing `test`, different from `DATABASE_URL`,
-and checks the connected database identity and required tables before fixtures
-write data. Use a dedicated test database even when these checks pass.
+an explicit PostgreSQL database name containing a `test` segment (separated by
+underscores or hyphens), different from `DATABASE_URL`. Names such as
+`customers_latest` do not qualify. Both URLs must name their databases directly;
+`dbname` and `service` query overrides are rejected because they can make the
+URL path misleading. The guard checks the connected database identity and required
+tables before fixtures write data. Use a dedicated test database even when these
+checks pass; a name check cannot establish that a database contains disposable data.
 
 ## Running the API
 
