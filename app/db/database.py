@@ -5,7 +5,7 @@ from app.core.config import get_environment
 
 environment = get_environment()
 
-engine = create_engine(environment.database_url)
+engine = create_engine(environment.database_url, hide_parameters=True)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
