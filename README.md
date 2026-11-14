@@ -141,13 +141,32 @@ Successful response (`201 Created`):
 }
 ```
 
-Email addresses must be valid ASCII addresses up to 254 characters. Surrounding
-whitespace is removed and the entire address is lowercased, including the local
-part. PostgreSQL enforces case-insensitive uniqueness using the unique
-`uq_users_email_lower` index on `lower(email)`, including writes outside the API.
+Email addresses are validated and normalised by Pydantic's `EmailStr` and
+`email-validator`, including Unicode local parts and internationalised domains.
+Surrounding whitespace is removed and the entire normalised address is lowercased,
+including the local part. The stored address is limited to 254 characters;
+`email-validator` also applies its protocol length and syntax checks. For example,
+`É@example.com` and `É@example.com` both become `é@example.com`, and
+`person@xn--bcher-kva.de` becomes `person@bücher.de`.
+
+PostgreSQL's unique `uq_users_email_lower` index on `lower(email)` prevents
+duplicates according to the database's collation and case-conversion rules.
+API registrations reject addresses that normalise to the same stored value,
+including the case, canonical-equivalence, and Unicode/punycode examples above.
+Lowercasing is not full Unicode case folding: distinct addresses such as
+`straße@example.com` and `strasse@example.com` are not merged by the API.
+Writes outside the API must use the same normalisation: the index
+does not perform Unicode canonical or IDNA normalisation, and Unicode case
+conversion depends on the database locale. Some locales lowercase only ASCII
+letters, so the index alone does not guarantee Unicode case-insensitive uniqueness.
 An existing email returns `409 Conflict` with
 `{"detail": "Email already registered"}`. Invalid inputs return `422`; registration
 validation errors omit submitted values to avoid exposing passwords.
+
+Email syntax validation does not verify mailbox ownership or deliverability.
+Unicode lookalikes can still represent distinct addresses; do not use their visual
+appearance to establish identity. Future mail delivery must support SMTPUTF8 for
+Unicode local parts and appropriate IDNA handling for internationalised domains.
 
 Passwords must contain 15–128 characters. Spaces and Unicode are allowed;
 passwords are never trimmed or silently truncated, and there are no required

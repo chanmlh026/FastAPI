@@ -27,6 +27,28 @@
   Page size defaults to 50 (also for zero) and is capped at 1,000. Keep cursors
   opaque, authenticated, versioned, and bound to the trimmed search query.
 
+## Constants and policy values
+
+- Avoid unexplained numeric or string literals that encode business rules,
+  security parameters, limits, timeouts, or other meaningful policies. Use
+  descriptive names when a value's meaning would otherwise be unclear.
+- Store feature-specific constants shared across modules in the relevant
+  feature's `constants.py`. Keep environment-dependent or deployment-configurable
+  values in `app/core/config.py`, following its existing settings-loading and
+  caching patterns.
+- Keep values used by only one function or module local to that scope; use a
+  descriptive local name or module constant when needed. Do not introduce global
+  constants unnecessarily.
+- Allow obvious literals such as `0`, `1`, and simple indices when their meaning
+  is clear and extracting them would reduce readability. These are not blanket
+  exceptions for values that encode an otherwise unexplained policy.
+- Prefer established framework constants or enums for standard HTTP status codes
+  and similar protocol values, such as `fastapi.status.HTTP_201_CREATED`.
+- Avoid duplicate definitions of the same policy across modules; reuse its
+  authoritative constant or configuration setting.
+- During implementation and final self-review, check modified code for
+  unexplained magic values and correct them where appropriate.
+
 ## Dependencies and database
 
 - Avoid unnecessary dependencies; prefer existing tools. Justified additions
@@ -76,3 +98,6 @@
   design decisions, checks run and their results (or why skipped), and any
   assumptions, blockers, or outstanding concerns. State whether application code
   changed. Preserve unrelated user edits and never claim unrun tests passed.
+- In the completion report, identify intentional numeric literals in modified
+  code that might otherwise appear to be magic numbers and briefly explain why
+  they remain literal.
