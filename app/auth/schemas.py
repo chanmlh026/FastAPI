@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -41,3 +41,18 @@ class UserResponse(BaseModel):
 
     id: int
     email: str
+
+
+class UserLogin(BaseModel):
+    email: EmailStrProcessed = Field(
+        description="Email address normalised exactly as for registration.",
+    )
+    password: SecretStr = Field(
+        max_length=MAX_PASSWORD_LENGTH,
+        description="Password as registered, including spaces and Unicode; never trimmed.",
+    )
+
+
+class TokenResponse(BaseModel):
+    access_token: str = Field(repr=False)
+    token_type: Literal["bearer"] = "bearer"

@@ -42,6 +42,8 @@ Create a `.env` file in the project root:
 ```dotenv
 DATABASE_URL=postgresql+psycopg://postgres:password@localhost:5432/customer_api
 PAGINATION_TOKEN_KEY=replace-with-a-generated-key
+JWT_SECRET_KEY=replace-with-independently-generated-hex-key
+ACCESS_TOKEN_EXPIRE_MINUTES=30
 ```
 
 Generate a pagination key once with:
@@ -52,6 +54,28 @@ uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_
 
 Keep this key secret and stable across application restarts and workers.
 Changing it invalidates previously issued page tokens.
+
+Generate a separate JWT signing key once with:
+
+```bash
+uv run python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Store the generated value as `JWT_SECRET_KEY` in the local `.env` or your secret
+manager. It must be hexadecimal encoding of at least 32 securely random bytes
+(64 hex characters for 32 bytes). HS256 uses the decoded bytes, not the literal
+hex text. Never use a password, example value, or the pagination key. Format and
+length checks reject malformed, short and repeated-byte placeholders, but cannot
+prove a key's randomness; use the secure generator above. Reusing the pagination
+key's decoded bytes for JWT signing is also rejected, even across encodings.
+Keep the key private and
+stable across restarts and workers. Rotating it makes existing tokens fail
+signature verification with the new key. Do not commit `.env`.
+
+`ACCESS_TOKEN_EXPIRE_MINUTES` defaults to 30 and accepts a positive integer minute
+count whose expiration can be represented. Missing or invalid JWT settings cause
+login to return a generic `503 Service Unavailable`; registration and customer
+endpoints continue to work. Settings are cached, so restart workers after changes.
 
 For tests, create `.env.test` with a connection to a separate test database:
 
@@ -87,6 +111,7 @@ available at:
 | Method | Path | Description |
 | --- | --- | --- |
 | `POST` | `/auth/register` | Register a user account |
+| `POST` | `/auth/login` | Authenticate an active user and issue an access token |
 | `GET` | `/customers` | List or search customers |
 | `GET` | `/customers/{customer_id}` | Get one customer |
 | `POST` | `/customers` | Create a customer |
@@ -183,11 +208,59 @@ hides bound parameters. Only ID and email are returned; passwords and hashes
 are never included in the response. Users default to active and receive a
 server-generated timezone-aware creation timestamp.
 
-This milestone creates accounts only: no login, JWT, email verification, or
-customer authorization is implemented. Customer endpoints keep their existing
-behavior. Serve over HTTPS and configure infrastructure to avoid logging request
-bodies or secrets. Public deployment still needs abuse controls and a measured
-hashing concurrency budget (each concurrent hash uses about 64 MiB).
+## User login
+
+```http
+POST /auth/login
+Content-Type: application/json
+
+{
+  "email": "person@example.com",
+  "password": "a long secure passphrase"
+}
+```
+
+Successful response (`200 OK`):
+
+```json
+{
+  "access_token": "<signed-jwt>",
+  "token_type": "bearer"
+}
+```
+
+Login uses exactly the registration Unicode email normalisation and looks up the
+stored normalised address. Passwords are verified with the existing Argon2id
+verifier and are never trimmed. Login allows short or empty strings to fail as
+credentials with `401`, rather than applying registration's password minimum;
+the existing maximum password length still applies. Invalid request shapes,
+emails or overlong passwords return `422` with submitted values omitted, including
+for malformed JSON. Registration's validation and response contract are unchanged.
+
+Unknown emails, incorrect passwords and inactive users all return
+`401 Unauthorized` with `{"detail": "Invalid credentials"}` and
+`WWW-Authenticate: Bearer`. No account fields or password hashes are returned.
+Login performs no database writes, including hash upgrades. Unknown users undergo
+one dummy Argon2id verification using a random hash generated once per worker;
+existing users are verified before checking active status. This reduces the main
+timing difference, but does not guarantee constant-time authentication.
+
+Tokens are signed with HS256 using `PyJWT`, and contain only `sub` (string user
+ID), `iat`, and `exp`. Timestamps originate from timezone-aware UTC datetimes and
+are encoded as JWT NumericDate seconds. The default lifetime is 30 minutes.
+Responses use `Cache-Control: no-store` and `Pragma: no-cache`. JWTs are signed,
+not encrypted; their claims are readable. Any token consumer must explicitly
+verify the HS256 signature, required claims, and expiration.
+
+Customer endpoints are **not JWT-protected** yet; no endpoint currently consumes
+the token. Employee approval, RBAC, refresh tokens, logout, revocation and email
+verification are not implemented. Inactivating a user blocks future logins but
+does not revoke issued tokens. Unicode email and direct-write normalisation
+limitations described above still apply. Serve over HTTPS and configure
+infrastructure to avoid logging request bodies, authorization headers, responses
+containing tokens, or secrets. Public deployment still needs abuse controls,
+rate limiting and a measured Argon2 concurrency budget (each concurrent
+verification uses about 64 MiB).
 
 ## Search and pagination
 
@@ -247,7 +320,9 @@ uv run pytest tests/test_registration.py
 ```
 
 Application imports also require `DATABASE_URL` in `.env` or the environment.
-Test fixtures generate their own pagination keys; no production secrets are needed.
+Test fixtures generate their own pagination and JWT keys; no production secrets
+are needed. Login tests also cover token signatures, claims, expiration, generic
+failures, validation secrecy, Unicode normalisation and invalid configuration.
 
 ## Project structure
 
@@ -255,12 +330,13 @@ Test fixtures generate their own pagination keys; no production secrets are need
 .
 |-- app/
 |   |-- auth/
-|   |   |-- constants.py       # Registration limits and index name
+|   |   |-- constants.py       # Auth limits, index name and JWT algorithm
 |   |   |-- models.py          # SQLAlchemy user model
 |   |   |-- passwords.py       # Argon2id hashing and verification
-|   |   |-- router.py          # Registration HTTP endpoint
+|   |   |-- router.py          # Registration and login HTTP endpoints
 |   |   |-- schemas.py         # Public request and response models
-|   |   `-- service.py         # Registration transaction
+|   |   |-- service.py         # Registration transaction and login workflow
+|   |   `-- tokens.py          # JWT creation
 |   |-- core/
 |   |   `-- config.py          # Environment configuration
 |   |-- customers/
@@ -277,6 +353,7 @@ Test fixtures generate their own pagination keys; no production secrets are need
 |-- tests/
 |   |-- conftest.py            # Test database configuration
 |   |-- test_registration.py   # Registration and password tests
+|   |-- test_login.py          # Login and JWT tests
 |   `-- test_customers.py      # API tests
 |-- .env                       # Local application configuration
 |-- .env.test                  # Local test configuration
