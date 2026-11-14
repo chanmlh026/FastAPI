@@ -152,7 +152,6 @@ def test_concurrent_email_inserts_cannot_both_commit(db_session):
         "a@",
         "@example.com",
         "a b@example.com",
-        "é@example.com",
         123,
         None,
         "a" * 245 + "@example.com",

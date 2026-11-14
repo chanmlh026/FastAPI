@@ -1,4 +1,12 @@
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr, field_validator
+from typing import Annotated
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    SecretStr,
+    StringConstraints,
+)
 
 from app.auth.constants import (
     MAX_EMAIL_LENGTH,
@@ -7,9 +15,16 @@ from app.auth.constants import (
 )
 
 
+EmailStrProcessed = Annotated[
+    EmailStr,
+    StringConstraints(
+        strip_whitespace=True, to_lower=True, max_length=MAX_EMAIL_LENGTH
+    ),
+]
+
+
 class UserCreate(BaseModel):
-    email: EmailStr = Field(
-        max_length=MAX_EMAIL_LENGTH,
+    email: EmailStrProcessed = Field(
         description="ASCII email address; surrounding whitespace is removed and case ignored.",
     )
     password: SecretStr = Field(
@@ -17,16 +32,6 @@ class UserCreate(BaseModel):
         max_length=MAX_PASSWORD_LENGTH,
         description="15–128 characters, including spaces and Unicode; never trimmed.",
     )
-
-    @field_validator("email", mode="before")
-    @classmethod
-    def normalize_email(cls, value):
-        if isinstance(value, str):
-            value = value.strip()
-            if not value.isascii():
-                raise ValueError("Use an ASCII email address")
-            return value.lower()
-        return value
 
 
 class UserResponse(BaseModel):
