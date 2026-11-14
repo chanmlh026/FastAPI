@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -14,10 +14,10 @@ app.include_router(auth_router)
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError):
-    if request.url.path.rstrip("/") == "/auth/register":
+    if request.url.path.rstrip("/") in {"/auth/register", "/auth/login"}:
         # Validation errors normally echo input, including rejected passwords.
         return JSONResponse(
-            status_code=422,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={
                 "detail": [
                     {key: error[key] for key in ("type", "loc", "msg")}
