@@ -14,7 +14,6 @@ from app.auth.constants import (
     MIN_PASSWORD_LENGTH,
 )
 
-
 EmailStrProcessed = Annotated[
     EmailStr,
     StringConstraints(
@@ -25,7 +24,10 @@ EmailStrProcessed = Annotated[
 
 class UserCreate(BaseModel):
     email: EmailStrProcessed = Field(
-        description="ASCII email address; surrounding whitespace is removed and case ignored.",
+        description=(
+            "Unicode email address normalised by email-validator; surrounding "
+            "whitespace is removed and the entire address is lowercased."
+        ),
     )
     password: SecretStr = Field(
         min_length=MIN_PASSWORD_LENGTH,

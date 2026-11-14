@@ -3,6 +3,7 @@ from queue import Queue
 from time import monotonic
 
 import pytest
+from fastapi import status
 from psycopg.errors import UniqueViolation
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select, text
@@ -94,6 +95,56 @@ def test_database_enforces_case_insensitive_uniqueness(db_session):
     assert error.value.orig.diag.constraint_name == "uq_users_email_lower"
 
 
+@pytest.mark.parametrize(
+    ("email", "normalised"),
+    [
+        ("  É@EXAMPLE.COM  ", "é@example.com"),
+        ("E\u0301@example.com", "é@example.com"),
+        ("person@xn--bcher-kva.de", "person@bücher.de"),
+        ("person@BÜCHER.DE", "person@bücher.de"),
+    ],
+)
+def test_unicode_email_normalisation_and_persistence(
+    client, db_session, email, normalised
+):
+    response = client.post(
+        "/auth/register", json={"email": email, "password": PASSWORD}
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.json()["email"] == normalised
+    user = db_session.get(UserModel, response.json()["id"])
+    assert user.email == normalised
+    assert verify_password(PASSWORD, user.password_hash)
+    assert PASSWORD not in response.text
+    assert user.password_hash not in response.text
+
+
+@pytest.mark.parametrize(
+    ("first", "equivalent"),
+    [
+        ("é@example.com", "É@EXAMPLE.COM"),
+        ("é@example.com", "E\u0301@example.com"),
+        ("person@bücher.de", "person@xn--bcher-kva.de"),
+        ("person@xn--bcher-kva.de", "PERSON@BÜCHER.DE"),
+    ],
+)
+def test_equivalent_unicode_emails_cannot_register_twice(
+    client, db_session, first, equivalent
+):
+    assert (
+        client.post(
+            "/auth/register", json={"email": first, "password": PASSWORD}
+        ).status_code
+        == status.HTTP_201_CREATED
+    )
+    response = client.post(
+        "/auth/register", json={"email": equivalent, "password": PASSWORD}
+    )
+    assert response.status_code == status.HTTP_409_CONFLICT
+    assert response.json() == {"detail": "Email already registered"}
+    assert db_session.scalar(select(func.count()).select_from(UserModel)) == 1
+
+
 def test_concurrent_email_inserts_cannot_both_commit(db_session):
     # Use the fixture's verified test engine for every connection, including workers.
     bind = db_session.get_bind()
@@ -152,6 +203,10 @@ def test_concurrent_email_inserts_cannot_both_commit(db_session):
         "a@",
         "@example.com",
         "a b@example.com",
+        "a\u200bb@example.com",  # Zero-width space.
+        "a\u202eb@example.com",  # Right-to-left override.
+        "a\x00b@example.com",
+        "a\nb@example.com",
         123,
         None,
         "a" * 245 + "@example.com",
